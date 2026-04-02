@@ -1,31 +1,39 @@
 {
   "name": "dead-env",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Find ghost and zombie environment variables in your codebase",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "bin": {
-    "dead-env": "./bin/dead-env.js"
+    "dead-env": "dist/index.js"
   },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
   "scripts": {
-    "start": "node --import tsx/esm src/index.ts",
-    "dev": "node --import tsx/esm src/index.ts",
     "build": "tsc",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "prepublishOnly": "npm run build"
   },
-  "keywords": ["env", "dotenv", "cli", "devtools"],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "env",
+    "dotenv",
+    "cli",
+    "devtools",
+    "dead-code"
+  ],
+  "author": "bkmsr",
+  "license": "MIT",
   "packageManager": "pnpm@10.30.3",
   "dependencies": {
-    "@types/node": "^25.5.0",
     "chalk": "^5.6.2",
     "commander": "^14.0.3",
-    "glob": "^13.0.6",
-    "tsx": "^4.21.0",
-    "typescript": "^6.0.2"
+    "glob": "^13.0.6"
   },
   "devDependencies": {
-    "@types/glob": "^9.0.0"
+    "@types/glob": "^9.0.0",
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
   }
 }
