@@ -7,6 +7,12 @@ import { parseEnvFiles } from './envParser.js';
 import { analyze, printReport, toJson } from './reporter.js';
 import { fixExampleFile, printFixResult } from './fixer.js';
 import { diffEnvFiles, printDiff } from './differ.js';
+import {
+  printValidationCi,
+  printValidationReport,
+  validateEnvUsage,
+  validationToJson,
+} from './validator.js';
 
 const program = new Command();
 const SUPPORTED_LANGUAGES: SupportedLanguage[] = ['js', 'ts', 'py', 'go'];
@@ -44,6 +50,8 @@ program
   .option('--example-file <path>', 'Example file path for --fix', '.env.example')
   .option('--diff <files...>', 'Compare two env files')
   .option('--values', 'Show actual values in --diff output')
+  .option('--validate', 'Validate env vars used in code against discovered .env* files')
+  .option('--strict', 'With --validate, exit with code 1 on unused env vars too')
   .option('-e, --env <glob>', 'Env file pattern', '**/.env*')
   .option(
     '-x, --exclude',
@@ -58,6 +66,8 @@ program
     exampleFile: string;
     diff?: string[];
     values: boolean;
+    validate: boolean;
+    strict: boolean;
     env: string;
     exclude: boolean;
     lang?: SupportedLanguage[];
@@ -86,6 +96,25 @@ program
       scanDirectory(resolvedPath, excludePatterns, options.lang),
       parseEnvFiles(resolvedPath, options.env, excludePatterns),
     ]);
+
+    if (options.validate) {
+      const validation = validateEnvUsage(usages, envFiles, resolvedPath);
+
+      if (options.json) {
+        console.log(JSON.stringify(validationToJson(validation), null, 2));
+      } else {
+        printValidationReport(validation);
+        if (options.ci) {
+          printValidationCi(validation);
+        }
+      }
+
+      const shouldFail = validation.missing.length > 0 || (options.strict && validation.unused.length > 0);
+      if (shouldFail) {
+        process.exit(1);
+      }
+      return;
+    }
 
     const result = analyze(usages, envFiles, resolvedPath);
 

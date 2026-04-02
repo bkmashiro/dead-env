@@ -44,11 +44,17 @@ Arguments:
   path              Directory to scan (default: current directory)
 
 Options:
+  --fix             Append missing detected vars to the example file
+  --example-file    Example file path for --fix (default: ".env.example")
+  --diff <files...> Compare two env files
+  --values          Show actual values in --diff output
+  --validate        Validate env vars used in code against discovered .env* files
+  --strict          With --validate, exit with code 1 on unused env vars too
   -e, --env <glob>  Env file pattern (default: "**/.env*")
   -x, --exclude     Exclude node_modules, .git, dist (default: true)
   --lang <langs>    Languages to scan: js,ts,py,go
   --json            Output as JSON
-  --ci              Exit with code 1 if any issues found (for CI use)
+  --ci              Emit GitHub Actions annotations in --validate mode
   -V, --version     Output the version number
   -h, --help        Show help
 ```
@@ -83,6 +89,24 @@ Only scan Python and Go files:
 
 ```bash
 dead-env --lang py,go
+```
+
+Validate env usage against all discovered `.env*` files:
+
+```bash
+dead-env --validate
+```
+
+Fail CI on unused env vars too:
+
+```bash
+dead-env --validate --strict
+```
+
+Emit GitHub Actions annotations on pull requests:
+
+```bash
+dead-env --validate --ci
 ```
 
 ### Example output
@@ -132,16 +156,16 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Run dead-env
-        run: npx dead-env --ci .
-        # Exits with code 1 if any ghosts, zombies, or drift are found
+      - name: Run dead-env validation
+        run: npx dead-env --validate --ci .
+        # Fails on missing env vars and adds PR annotations
 ```
 
 You can also make it non-blocking (report only, don't fail the build):
 
 ```yaml
       - name: Run dead-env (advisory)
-        run: npx dead-env --json . | tee env-report.json || true
+        run: npx dead-env --validate --json . | tee env-report.json || true
 
       - name: Upload env report
         uses: actions/upload-artifact@v4

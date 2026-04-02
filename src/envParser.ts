@@ -2,9 +2,15 @@ import { readFileSync } from 'fs';
 import { glob } from 'glob';
 import path from 'path';
 
+export interface EnvVarDeclaration {
+  value: string;
+  line: number;
+}
+
 export interface EnvFile {
   file: string;
   vars: Map<string, string>;
+  declarations: Map<string, EnvVarDeclaration>;
 }
 
 /**
@@ -12,16 +18,27 @@ export interface EnvFile {
  * Skips blank lines and comments. Handles quoted values.
  */
 export function parseEnvFile(filePath: string): Map<string, string> {
+  return parseEnvFileDetailed(filePath).vars;
+}
+
+/**
+ * Parse a single .env file, returning key -> { value, line } metadata.
+ */
+export function parseEnvFileDetailed(filePath: string): {
+  vars: Map<string, string>;
+  declarations: Map<string, EnvVarDeclaration>;
+} {
   const vars = new Map<string, string>();
+  const declarations = new Map<string, EnvVarDeclaration>();
 
   let content: string;
   try {
     content = readFileSync(filePath, 'utf-8');
   } catch {
-    return vars;
+    return { vars, declarations };
   }
 
-  for (const rawLine of content.split('\n')) {
+  for (const [lineIdx, rawLine] of content.split('\n').entries()) {
     const line = rawLine.trim();
 
     // Skip blank lines and comments
@@ -50,9 +67,10 @@ export function parseEnvFile(filePath: string): Map<string, string> {
     }
 
     vars.set(key, value);
+    declarations.set(key, { value, line: lineIdx + 1 });
   }
 
-  return vars;
+  return { vars, declarations };
 }
 
 /**
@@ -81,8 +99,12 @@ export async function parseEnvFiles(
     return !/\.(?:[cm]?[jt]sx?|py|go)$/i.test(base);
   });
 
-  return envFiles.map((file) => ({
-    file,
-    vars: parseEnvFile(file),
-  }));
+  return envFiles.map((file) => {
+    const { vars, declarations } = parseEnvFileDetailed(file);
+    return {
+      file,
+      vars,
+      declarations,
+    };
+  });
 }

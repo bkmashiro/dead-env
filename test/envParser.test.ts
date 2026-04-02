@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { parseEnvFile, parseEnvFiles } from '../src/envParser.ts';
+import { parseEnvFile, parseEnvFileDetailed, parseEnvFiles } from '../src/envParser.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sampleEnv = path.join(__dirname, 'fixtures', 'sample.env');
@@ -84,6 +84,28 @@ describe('parseEnvFile', () => {
   });
 });
 
+describe('parseEnvFileDetailed', () => {
+  test('captures declaration line numbers', () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), 'dead-env-envdetails-'));
+    const filePath = path.join(tempDir, '.env');
+
+    writeFileSync(
+      filePath,
+      [
+        '# comment',
+        'FIRST=value',
+        '',
+        'SECOND=two',
+      ].join('\n'),
+    );
+
+    const detailed = parseEnvFileDetailed(filePath);
+
+    assert.deepStrictEqual(detailed.declarations.get('FIRST'), { value: 'value', line: 2 });
+    assert.deepStrictEqual(detailed.declarations.get('SECOND'), { value: 'two', line: 4 });
+  });
+});
+
 describe('parseEnvFiles', () => {
   test('finds env files, parses them, and ignores non-env matches', async () => {
     const tempDir = mkdtempSync(path.join(tmpdir(), 'dead-env-envfiles-'));
@@ -102,6 +124,10 @@ describe('parseEnvFiles', () => {
     );
     assert.strictEqual(envFiles.find((entry) => path.basename(entry.file) === '.env')?.vars.get('ROOT_VAR'), 'root');
     assert.strictEqual(envFiles.find((entry) => path.basename(entry.file) === '.env.local')?.vars.get('LOCAL_VAR'), 'local');
+    assert.deepStrictEqual(
+      envFiles.find((entry) => path.basename(entry.file) === '.env.production')?.declarations.get('PROD_VAR'),
+      { value: 'prod', line: 1 },
+    );
   });
 
   test('respects the glob pattern and exclude list', async () => {
