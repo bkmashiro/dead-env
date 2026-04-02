@@ -44,6 +44,7 @@ Arguments:
 Options:
   -e, --env <glob>  Env file pattern (default: "**/.env*")
   -x, --exclude     Exclude node_modules, .git, dist (default: true)
+  --lang <langs>    Languages to scan: js,ts,py,go
   --json            Output as JSON
   --ci              Exit with code 1 if any issues found (for CI use)
   -V, --version     Output the version number
@@ -74,6 +75,12 @@ Only look at `.env` and `.env.production`:
 
 ```bash
 dead-env -e ".env{,.production}"
+```
+
+Only scan Python and Go files:
+
+```bash
+dead-env --lang py,go
 ```
 
 ### Example output
@@ -147,8 +154,7 @@ dead-env recognizes env var access patterns from:
 
 - **JavaScript / TypeScript** — `process.env.VAR`, `process.env['VAR']`
 - **Python** — `os.environ.get('VAR')`, `os.environ['VAR']`, `os.getenv('VAR')`
-- **Shell scripts** — `$VAR`, `${VAR}`
-- **YAML, TOML, JSON** config files that reference the above patterns
+- **Go** — `os.Getenv("VAR")`, `os.LookupEnv("VAR")`
 
 ## License
 

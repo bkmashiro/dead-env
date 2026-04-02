@@ -4,12 +4,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { scanFile } from '../src/scanner.ts';
+import { scanDirectory, scanFile } from '../src/scanner.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixtureDir = path.join(__dirname, 'fixtures');
 const sampleTs = path.join(fixtureDir, 'sample.ts');
 const samplePy = path.join(fixtureDir, 'sample.py');
+const sampleGo = path.join(fixtureDir, 'sample.go');
 
 function getVarNames(filePath: string): string[] {
   return scanFile(filePath).map((usage) => usage.varName);
@@ -60,7 +61,22 @@ describe('scanFile', () => {
     assert.deepStrictEqual(scanFile(filePath), []);
   });
 
-  test('scans Python env access in the future-support fixture', () => {
-    assert.deepStrictEqual(getVarNames(samplePy), ['PY_API_KEY', 'PY_MODE', 'PY_LEGACY']);
+  test('detects Python env access patterns', () => {
+    assert.deepStrictEqual(getVarNames(samplePy), ['DB_HOST', 'SECRET_KEY', 'PORT']);
+  });
+
+  test('detects Go env access patterns', () => {
+    assert.deepStrictEqual(getVarNames(sampleGo), ['DB_URL', 'API_KEY']);
+  });
+});
+
+describe('scanDirectory', () => {
+  test('filters scanned files with --lang-compatible language selection', async () => {
+    const usages = await scanDirectory(fixtureDir, [], ['py']);
+
+    assert.deepStrictEqual(
+      usages.map((usage) => usage.varName),
+      ['DB_HOST', 'SECRET_KEY', 'PORT'],
+    );
   });
 });

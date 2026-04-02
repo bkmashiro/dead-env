@@ -7,67 +7,74 @@ export interface VarUsage {
   line: number;
 }
 
-// Patterns for various languages/runtimes
-// Note: Using RegExp constructor to avoid esbuild's regex literal parser
-// choking on patterns with unbalanced parens (e.g. \( capturing group \) ).
+export type SupportedLanguage = 'js' | 'ts' | 'py' | 'go';
+
+const LANGUAGE_EXTENSIONS: Record<SupportedLanguage, string[]> = {
+  js: ['.js', '.jsx', '.mjs', '.cjs'],
+  ts: ['.ts', '.tsx'],
+  py: ['.py'],
+  go: ['.go'],
+};
+
+const ALL_LANGUAGES = Object.keys(LANGUAGE_EXTENSIONS) as SupportedLanguage[];
+
 const VAR_GROUP = '([A-Z_][A-Z0-9_]*)';
 const QUOTE = `['"]`;
-const CODE_PATTERNS: RegExp[] = [
-  // Node.js / JS / TS: process.env.VAR_NAME
+const JS_TS_PATTERNS: RegExp[] = [
   new RegExp(`process\\.env\\.${VAR_GROUP}`, 'g'),
-  // Node.js / JS / TS: process.env['VAR_NAME'] or process.env["VAR_NAME"]
   new RegExp(`process\\.env\\[${QUOTE}${VAR_GROUP}${QUOTE}\\]`, 'g'),
-  // Vite / ESM: import.meta.env.VAR_NAME
   new RegExp(`import\\.meta\\.env\\.${VAR_GROUP}`, 'g'),
-  // Generic object access: env.VAR_NAME
   new RegExp(`(?<![A-Za-z0-9_.])env\\.${VAR_GROUP}`, 'g'),
-  // Python: os.environ.get('VAR') or os.environ.get("VAR")
+];
+
+const PYTHON_PATTERNS: RegExp[] = [
   new RegExp(`os\\.environ\\.get\\(${QUOTE}${VAR_GROUP}${QUOTE}\\)`, 'g'),
-  // Python: os.environ['VAR'] or os.environ["VAR"]
   new RegExp(`os\\.environ\\[${QUOTE}${VAR_GROUP}${QUOTE}\\]`, 'g'),
-  // Python: os.getenv('VAR') or os.getenv("VAR")
   new RegExp(`os\\.getenv\\(${QUOTE}${VAR_GROUP}${QUOTE}\\)`, 'g'),
 ];
 
-// Shell patterns — handled separately with line-level context
-const SHELL_PATTERNS: RegExp[] = [
-  // ${VAR_NAME}
-  new RegExp('\\$\\{([A-Z_][A-Z0-9_]*)\\}', 'g'),
-  // $VAR_NAME (2+ chars to avoid $0, $1, etc.)
-  new RegExp('\\$([A-Z_][A-Z0-9_]+)', 'g'),
+const GO_PATTERNS: RegExp[] = [
+  new RegExp(`os\\.Getenv\\(${QUOTE}${VAR_GROUP}${QUOTE}\\)`, 'g'),
+  new RegExp(`os\\.LookupEnv\\(${QUOTE}${VAR_GROUP}${QUOTE}\\)`, 'g'),
 ];
 
-// File extensions to scan
-const CODE_EXTENSIONS = new Set([
-  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
-  '.py', '.rb', '.go', '.java', '.php', '.cs',
-  '.sh', '.bash', '.zsh', '.fish',
-  '.yml', '.yaml', '.toml', '.json',
-  'Makefile', 'Dockerfile',
-]);
-
-function isCodeFile(filePath: string): boolean {
-  const lower = filePath.toLowerCase();
-  for (const ext of CODE_EXTENSIONS) {
-    if (lower.endsWith(ext)) return true;
+function normalizeLanguages(languages?: SupportedLanguage[]): SupportedLanguage[] {
+  if (!languages || languages.length === 0) {
+    return ALL_LANGUAGES;
   }
-  // Bare filenames like Makefile, Dockerfile
-  const base = filePath.split('/').pop() ?? '';
-  return CODE_EXTENSIONS.has(base);
+
+  return [...new Set(languages)];
 }
 
-function isShellFile(filePath: string): boolean {
+function getFileLanguage(filePath: string): SupportedLanguage | null {
   const lower = filePath.toLowerCase();
-  return lower.endsWith('.sh') || lower.endsWith('.bash') ||
-    lower.endsWith('.zsh') || lower.endsWith('.fish') ||
-    lower.endsWith('Makefile');
+
+  for (const language of ALL_LANGUAGES) {
+    if (LANGUAGE_EXTENSIONS[language].some((ext) => lower.endsWith(ext))) {
+      return language;
+    }
+  }
+
+  return null;
 }
 
 function isJsLikeFile(filePath: string): boolean {
-  const lower = filePath.toLowerCase();
-  return lower.endsWith('.ts') || lower.endsWith('.tsx') ||
-    lower.endsWith('.js') || lower.endsWith('.jsx') ||
-    lower.endsWith('.mjs') || lower.endsWith('.cjs');
+  const language = getFileLanguage(filePath);
+  return language === 'js' || language === 'ts';
+}
+
+function getPatternsForFile(filePath: string): RegExp[] {
+  switch (getFileLanguage(filePath)) {
+    case 'js':
+    case 'ts':
+      return JS_TS_PATTERNS;
+    case 'py':
+      return PYTHON_PATTERNS;
+    case 'go':
+      return GO_PATTERNS;
+    default:
+      return [];
+  }
 }
 
 function getIgnoredRanges(
@@ -151,6 +158,11 @@ function isIgnored(index: number, ranges: Array<[number, number]>): boolean {
  */
 export function scanFile(filePath: string): VarUsage[] {
   const usages: VarUsage[] = [];
+  const patterns = getPatternsForFile(filePath);
+
+  if (patterns.length === 0) {
+    return usages;
+  }
 
   let content: string;
   try {
@@ -160,10 +172,6 @@ export function scanFile(filePath: string): VarUsage[] {
   }
 
   const lines = content.split('\n');
-
-  const patterns = isShellFile(filePath)
-    ? [...CODE_PATTERNS, ...SHELL_PATTERNS]
-    : CODE_PATTERNS;
 
   let inBlockComment = false;
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
@@ -200,6 +208,7 @@ export function scanFile(filePath: string): VarUsage[] {
 export async function scanDirectory(
   rootDir: string,
   excludePatterns: string[] = ['**/node_modules/**', '**/.git/**', '**/dist/**'],
+  languages?: SupportedLanguage[],
 ): Promise<VarUsage[]> {
   const files = await glob('**/*', {
     cwd: rootDir,
@@ -209,7 +218,11 @@ export async function scanDirectory(
     nodir: true,
   });
 
-  const codeFiles = files.filter(isCodeFile);
+  const selectedLanguages = normalizeLanguages(languages);
+  const codeFiles = files.filter((file) => {
+    const language = getFileLanguage(file);
+    return language !== null && selectedLanguages.includes(language);
+  });
 
   const allUsages: VarUsage[] = [];
   for (const file of codeFiles) {
