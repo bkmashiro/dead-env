@@ -5,6 +5,8 @@ import path from 'path';
 import { scanDirectory, type SupportedLanguage } from './scanner.js';
 import { parseEnvFiles } from './envParser.js';
 import { analyze, printReport, toJson } from './reporter.js';
+import { fixExampleFile, printFixResult } from './fixer.js';
+import { diffEnvFiles, printDiff } from './differ.js';
 
 const program = new Command();
 const SUPPORTED_LANGUAGES: SupportedLanguage[] = ['js', 'ts', 'py', 'go'];
@@ -38,6 +40,10 @@ program
   .description('Find ghost/zombie environment variables in your codebase')
   .version(packageJson.version)
   .argument('[path]', 'Directory to scan', '.')
+  .option('--fix', 'Append missing detected vars to the example file')
+  .option('--example-file <path>', 'Example file path for --fix', '.env.example')
+  .option('--diff <files...>', 'Compare two env files')
+  .option('--values', 'Show actual values in --diff output')
   .option('-e, --env <glob>', 'Env file pattern', '**/.env*')
   .option(
     '-x, --exclude',
@@ -48,12 +54,27 @@ program
   .option('--json', 'Output as JSON')
   .option('--ci', 'Exit with code 1 if any issues found (for CI use)')
   .action(async (scanPath: string, options: {
+    fix: boolean;
+    exampleFile: string;
+    diff?: string[];
+    values: boolean;
     env: string;
     exclude: boolean;
     lang?: SupportedLanguage[];
     json: boolean;
     ci: boolean;
   }) => {
+    if (options.diff) {
+      if (options.diff.length !== 2) {
+        throw new Error('--diff expects exactly two env files');
+      }
+
+      const [firstFile, secondFile] = options.diff.map((file) => path.resolve(process.cwd(), file));
+      const result = diffEnvFiles(firstFile, secondFile);
+      printDiff(result, options.values);
+      return;
+    }
+
     const resolvedPath = path.resolve(process.cwd(), scanPath);
 
     const excludePatterns = options.exclude
@@ -72,6 +93,12 @@ program
       console.log(JSON.stringify(toJson(result), null, 2));
     } else {
       printReport(result);
+    }
+
+    if (options.fix) {
+      const exampleFile = path.resolve(resolvedPath, options.exampleFile);
+      const fixResult = fixExampleFile(exampleFile, usages);
+      printFixResult(fixResult);
     }
 
     const { ghosts, zombies, drifts } = result;
