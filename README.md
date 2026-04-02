@@ -1,3 +1,5 @@
+[![npm](https://img.shields.io/npm/v/dead-env)](https://www.npmjs.com/package/dead-env) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 # dead-env
 
 Hunt down ghost and zombie environment variables haunting your codebase.

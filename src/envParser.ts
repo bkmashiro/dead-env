@@ -74,8 +74,11 @@ export async function parseEnvFiles(
   // Filter to only real .env files (not .ts, .js, etc. that happen to match)
   const envFiles = files.filter((f) => {
     const base = path.basename(f);
-    // Match .env, .env.production, .env.local, .env.example, etc.
-    return /^\.env(\..+)?$/.test(base);
+    if (!/^\.env(\..+)?$/.test(base)) {
+      return false;
+    }
+
+    return !/\.(?:[cm]?[jt]sx?|py|go)$/i.test(base);
   });
 
   return envFiles.map((file) => ({
