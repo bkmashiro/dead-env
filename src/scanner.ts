@@ -17,6 +17,10 @@ const CODE_PATTERNS: RegExp[] = [
   new RegExp(`process\\.env\\.${VAR_GROUP}`, 'g'),
   // Node.js / JS / TS: process.env['VAR_NAME'] or process.env["VAR_NAME"]
   new RegExp(`process\\.env\\[${QUOTE}${VAR_GROUP}${QUOTE}\\]`, 'g'),
+  // Vite / ESM: import.meta.env.VAR_NAME
+  new RegExp(`import\\.meta\\.env\\.${VAR_GROUP}`, 'g'),
+  // Generic object access: env.VAR_NAME
+  new RegExp(`(?<![A-Za-z0-9_.])env\\.${VAR_GROUP}`, 'g'),
   // Python: os.environ.get('VAR') or os.environ.get("VAR")
   new RegExp(`os\\.environ\\.get\\(${QUOTE}${VAR_GROUP}${QUOTE}\\)`, 'g'),
   // Python: os.environ['VAR'] or os.environ["VAR"]
@@ -59,6 +63,89 @@ function isShellFile(filePath: string): boolean {
     lower.endsWith('Makefile');
 }
 
+function isJsLikeFile(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return lower.endsWith('.ts') || lower.endsWith('.tsx') ||
+    lower.endsWith('.js') || lower.endsWith('.jsx') ||
+    lower.endsWith('.mjs') || lower.endsWith('.cjs');
+}
+
+function getIgnoredRanges(
+  line: string,
+  filePath: string,
+  inBlockComment: boolean,
+): { ranges: Array<[number, number]>; inBlockComment: boolean } {
+  if (!isJsLikeFile(filePath)) {
+    return { ranges: [], inBlockComment };
+  }
+
+  const ranges: Array<[number, number]> = [];
+  let idx = 0;
+  let blockComment = inBlockComment;
+
+  while (idx < line.length) {
+    if (blockComment) {
+      const endIdx = line.indexOf('*/', idx);
+      if (endIdx === -1) {
+        ranges.push([idx, line.length]);
+        return { ranges, inBlockComment: true };
+      }
+      ranges.push([idx, endIdx + 2]);
+      idx = endIdx + 2;
+      blockComment = false;
+      continue;
+    }
+
+    const char = line[idx];
+    const next = line[idx + 1];
+
+    if (char === '/' && next === '/') {
+      ranges.push([idx, line.length]);
+      break;
+    }
+
+    if (char === '/' && next === '*') {
+      const endIdx = line.indexOf('*/', idx + 2);
+      if (endIdx === -1) {
+        ranges.push([idx, line.length]);
+        return { ranges, inBlockComment: true };
+      }
+      ranges.push([idx, endIdx + 2]);
+      idx = endIdx + 2;
+      continue;
+    }
+
+    if (char === '"' || char === '\'' || char === '`') {
+      const quote = char;
+      const start = idx;
+      idx++;
+
+      while (idx < line.length) {
+        if (line[idx] === '\\') {
+          idx += 2;
+          continue;
+        }
+        if (line[idx] === quote) {
+          idx++;
+          break;
+        }
+        idx++;
+      }
+
+      ranges.push([start, idx]);
+      continue;
+    }
+
+    idx++;
+  }
+
+  return { ranges, inBlockComment: blockComment };
+}
+
+function isIgnored(index: number, ranges: Array<[number, number]>): boolean {
+  return ranges.some(([start, end]) => index >= start && index < end);
+}
+
 /**
  * Scan a single file for env var references.
  */
@@ -78,13 +165,20 @@ export function scanFile(filePath: string): VarUsage[] {
     ? [...CODE_PATTERNS, ...SHELL_PATTERNS]
     : CODE_PATTERNS;
 
+  let inBlockComment = false;
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const line = lines[lineIdx] ?? '';
+    const ignored = getIgnoredRanges(line, filePath, inBlockComment);
+    inBlockComment = ignored.inBlockComment;
 
     for (const pattern of patterns) {
       pattern.lastIndex = 0; // reset stateful regex
       let match: RegExpExecArray | null;
       while ((match = pattern.exec(line)) !== null) {
+        if (isIgnored(match.index, ignored.ranges)) {
+          continue;
+        }
+
         const varName = match[1];
         if (varName) {
           usages.push({

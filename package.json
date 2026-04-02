@@ -13,6 +13,8 @@
   ],
   "scripts": {
     "build": "tsc",
+    "test": "node --import tsx/esm --test test/**/*.test.ts",
+    "test:watch": "node --import tsx/esm --test --watch test/**/*.test.ts",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
