@@ -19,6 +19,9 @@ import {
   printMultiCiSecretsReport,
   ciSecretsToJson,
   inferGitHubRepo,
+  compareCodeVsGithubSecrets,
+  printGithubSecretsReport,
+  githubSecretsToJson,
 } from './ciSecrets.js';
 
 const program = new Command();
@@ -116,6 +119,14 @@ program
     'Requires GITHUB_TOKEN env var.',
   )
   .option(
+    '--github-secrets [repo]',
+    'Compare env vars referenced in source code against GitHub Actions secrets. ' +
+    'Reports which secrets are used in code but not configured (unconfigured) ' +
+    'and which are configured but never referenced in code (unused). ' +
+    'Optionally pass owner/repo; otherwise inferred from git remote. ' +
+    'Requires GITHUB_TOKEN env var.',
+  )
+  .option(
     '--multi-repo <paths...>',
     'Scan multiple repo paths or globs and produce a merged report',
   )
@@ -132,6 +143,7 @@ program
     json: boolean;
     ci: boolean;
     ciSecrets?: string | boolean;
+    githubSecrets?: string | boolean;
     multiRepo?: string[];
   }) => {
     if (options.diff) {
@@ -237,6 +249,45 @@ program
       }
 
       if (options.ci && (result.missing.length > 0 || result.extra.length > 0)) {
+        process.exit(1);
+      }
+      return;
+    }
+
+    // ── GitHub secrets vs code compare ────────────────────────────────────
+    if (options.githubSecrets !== undefined) {
+      const token = process.env['GITHUB_TOKEN'] ?? '';
+      if (!token) {
+        throw new Error('--github-secrets requires GITHUB_TOKEN environment variable');
+      }
+
+      const resolvedPath = path.resolve(process.cwd(), scanPath);
+      const usages = await scanDirectory(resolvedPath, excludePatterns, options.lang);
+      const codeVarNames = [...new Set(usages.map((u) => u.varName))].sort();
+
+      let repoSlug: string;
+      if (typeof options.githubSecrets === 'string' && options.githubSecrets.includes('/')) {
+        repoSlug = options.githubSecrets;
+      } else {
+        const inferred = await inferGitHubRepo(resolvedPath);
+        if (!inferred) {
+          throw new Error(
+            '--github-secrets: could not infer GitHub repo from git remote. ' +
+            'Pass owner/repo explicitly: --github-secrets owner/repo',
+          );
+        }
+        repoSlug = inferred;
+      }
+
+      const result = await compareCodeVsGithubSecrets(repoSlug, codeVarNames, token);
+
+      if (options.json) {
+        console.log(JSON.stringify(githubSecretsToJson(result), null, 2));
+      } else {
+        printGithubSecretsReport(result);
+      }
+
+      if (options.ci && (result.unconfigured.length > 0 || result.unused.length > 0)) {
         process.exit(1);
       }
       return;

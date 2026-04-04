@@ -8,6 +8,17 @@ export interface CiSecretsResult {
   extra: string[];     // in GitHub secrets but not in .env
 }
 
+export interface GithubSecretsResult {
+  repo: string;
+  /** env vars referenced in source code */
+  codeVars: string[];
+  githubSecrets: string[];
+  /** used in code but not configured as GitHub Actions secrets */
+  unconfigured: string[];
+  /** configured as GitHub Actions secrets but never referenced in code */
+  unused: string[];
+}
+
 async function fetchGitHubSecrets(repo: string, token: string): Promise<string[]> {
   const headers: Record<string, string> = {
     'Accept': 'application/vnd.github+json',
@@ -141,6 +152,90 @@ export function ciSecretsToJson(results: CiSecretsResult[]): object {
       missing: r.missing,
       extra: r.extra,
     })),
+  };
+}
+
+export async function compareCodeVsGithubSecrets(
+  repo: string,
+  codeVarNames: string[],
+  token: string,
+): Promise<GithubSecretsResult> {
+  const githubSecrets = await fetchGitHubSecrets(repo, token);
+  const codeSet = new Set(codeVarNames);
+  const githubSet = new Set(githubSecrets);
+
+  const unconfigured = codeVarNames.filter((v) => !githubSet.has(v)).sort();
+  const unused = githubSecrets.filter((v) => !codeSet.has(v)).sort();
+
+  return {
+    repo,
+    codeVars: codeVarNames.sort(),
+    githubSecrets,
+    unconfigured,
+    unused,
+  };
+}
+
+export function printGithubSecretsReport(result: GithubSecretsResult): void {
+  const divider = chalk.dim('─'.repeat(40));
+  console.log('');
+  console.log(chalk.bold(`GitHub Actions secrets compare: ${chalk.cyan(result.repo)}`));
+  console.log(divider);
+  console.log(chalk.dim(`  Env vars in code:   ${result.codeVars.length}`));
+  console.log(chalk.dim(`  GitHub secrets:     ${result.githubSecrets.length}`));
+
+  if (result.unconfigured.length > 0) {
+    console.log('');
+    console.log(
+      chalk.bold.red('❌ Unconfigured secrets') +
+      chalk.dim(' (used in code, not set as GitHub Actions secret):'),
+    );
+    for (const v of result.unconfigured) {
+      console.log(`  ${chalk.red(v)}`);
+    }
+  } else {
+    console.log('');
+    console.log(chalk.green('✅ All code env vars are configured as secrets.'));
+  }
+
+  if (result.unused.length > 0) {
+    console.log('');
+    console.log(
+      chalk.bold.yellow('⚠️  Unused secrets') +
+      chalk.dim(' (configured in GitHub Actions, not referenced in code):'),
+    );
+    for (const v of result.unused) {
+      console.log(`  ${chalk.yellow(v)}`);
+    }
+  } else {
+    console.log('');
+    console.log(chalk.green('✅ No unused GitHub secrets found.'));
+  }
+
+  console.log('');
+  console.log(divider);
+  if (result.unconfigured.length === 0 && result.unused.length === 0) {
+    console.log(chalk.bold.green('All clear! Secrets and code are in sync.'));
+  } else {
+    const parts: string[] = [];
+    if (result.unconfigured.length > 0) parts.push(chalk.red(`${result.unconfigured.length} unconfigured`));
+    if (result.unused.length > 0) parts.push(chalk.yellow(`${result.unused.length} unused`));
+    console.log(chalk.bold('Summary: ') + parts.join(', '));
+  }
+  console.log('');
+}
+
+export function githubSecretsToJson(result: GithubSecretsResult): object {
+  return {
+    repo: result.repo,
+    summary: {
+      codeVars: result.codeVars.length,
+      githubSecrets: result.githubSecrets.length,
+      unconfigured: result.unconfigured.length,
+      unused: result.unused.length,
+    },
+    unconfigured: result.unconfigured,
+    unused: result.unused,
   };
 }
 
